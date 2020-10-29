@@ -1,3 +1,195 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: 'AWS::Serverless-2016-10-31'
-Resources: {}
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  RedshiftProxy:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub
+        - ${ResourceName} From Stack ${StackTagName} Environment ${EnvironmentTagName}
+        - ResourceName: RedshiftProxy
+      StageName: !Ref EnvironmentAPIGatewayStageName
+      DefinitionBody:
+        swagger: '2.0'
+        info: {}
+        paths:
+          /ExecuteStatement/{template_id}:
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ExecuteStatement.Arn}/invocations
+              responses: {}
+          /CancelStatement/{statement_id}:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CancelStatement.Arn}/invocations
+              responses: {}
+          /StatementResult/{statement_id}:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetStatementResult.Arn}/invocations
+              responses: {}
+          /StatementTemplates:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ListStatementTemplates.Arn}/invocations
+              responses: {}
+          /Status/{statement_id}:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DescribeStatement.Arn}/invocations
+              responses: {}
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+  CancelStatement:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-CancelStatement
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: CancelStatement
+      CodeUri: src/CancelStatement
+      Handler: main
+      Runtime: go1.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+      Events:
+        RedshiftProxyGETCancelStatementstatementid:
+          Type: Api
+          Properties:
+            Path: /CancelStatement/{statement_id}
+            Method: GET
+            RestApiId: !Ref RedshiftProxy
+  GetStatementResult:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-GetStatementResult
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: GetStatementResult
+      CodeUri: src/GetStatementResult
+      Handler: main
+      Runtime: go1.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+      Events:
+        RedshiftProxyGETStatementResultstatementid:
+          Type: Api
+          Properties:
+            Path: /StatementResult/{statement_id}
+            Method: GET
+            RestApiId: !Ref RedshiftProxy
+  ListStatementTemplates:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-ListStatementTemplates
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: ListStatementTemplates
+      CodeUri: src/ListStatementTemplates
+      Handler: main
+      Runtime: go1.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StatementTemplates
+      Events:
+        RedshiftProxyGETStatementTemplates:
+          Type: Api
+          Properties:
+            Path: /StatementTemplates
+            Method: GET
+            RestApiId: !Ref RedshiftProxy
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StatementTemplates
+          TABLE_ARN: !GetAtt StatementTemplates.Arn
+  ExecuteStatement:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-ExecuteStatement
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: ExecuteStatement
+      CodeUri: src/ExecuteStatement
+      Handler: main
+      Runtime: go1.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StatementTemplates
+      Events:
+        RedshiftProxyPOSTExecuteStatementtemplateid:
+          Type: Api
+          Properties:
+            Path: /ExecuteStatement/{template_id}
+            Method: POST
+            RestApiId: !Ref RedshiftProxy
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StatementTemplates
+          TABLE_ARN: !GetAtt StatementTemplates.Arn
+  DescribeStatement:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-DescribeStatement
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: DescribeStatement
+      CodeUri: src/DescribeStatement
+      Handler: main
+      Runtime: go1.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+      Events:
+        RedshiftProxyGETStatusstatementid:
+          Type: Api
+          Properties:
+            Path: /Status/{statement_id}
+            Method: GET
+            RestApiId: !Ref RedshiftProxy
+  StatementTemplates:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+Parameters:
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+  EnvironmentAPIGatewayStageName:
+    Type: String
+    Description: Environment name used for API Gateway Stage names (injected by Stackery at deployment time)
